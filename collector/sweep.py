@@ -32,10 +32,34 @@ class Collector:
         capture_id: str,
         versions: Mapping[str, str],
     ) -> str:
+        return self._capture(source, export_id, capture_id, versions, with_site_receipts=False)
+
+    def capture_frozen_with_receipts(
+        self,
+        source: FrozenSource,
+        export_id: str,
+        capture_id: str,
+        versions: Mapping[str, str],
+    ) -> str:
+        """Collect the whole frozen order and sign a receipt for every bound station atomically."""
+        return self._capture(source, export_id, capture_id, versions, with_site_receipts=True)
+
+    def _capture(
+        self,
+        source: FrozenSource,
+        export_id: str,
+        capture_id: str,
+        versions: Mapping[str, str],
+        *,
+        with_site_receipts: bool,
+    ) -> str:
         bindings = resolve_bindings(self._catalog, versions)
         builder = CaptureBuilder(capture_id, export_id, bindings)
         while (request := builder.next_request()) is not None:
             column, page_number = request
             page = source.read_page(export_id, column, page_number)
             builder.accept_page(page)
-        return self._publisher.publish(builder.finish())
+        manifest = builder.finish()
+        if with_site_receipts:
+            return self._publisher.publish_with_receipts(manifest)
+        return self._publisher.publish(manifest)

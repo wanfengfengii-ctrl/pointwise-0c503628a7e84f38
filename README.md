@@ -9,9 +9,10 @@
 ```text
 python3 -B check_project.py
 python3 -B -m examples.handover
+python3 -B -m examples.site_handover
 ```
 
-`check_project.py` 由控制台在物化时提供，执行 `tests` 中的完整回归。演示在临时目录写入站点库及归档，发布后关闭两种来源并重开归档。断言或业务操作失败时进程返回非零退出码。
+`check_project.py` 由控制台在物化时提供，执行 `tests` 中的完整回归。演示在临时目录写入站点库及归档，发布后关闭两种来源并重开归档。断言或业务操作失败时进程返回非零退出码。`examples.site_handover` 演示单站交班：先另存各站回执，再关停门户与站点库，重开归档领取单站包，最后关闭归档并仅凭另存回执离线核验。
 
 ## 日班与夜班接口
 
@@ -25,6 +26,19 @@ python3 -B -m examples.handover
 | 停源复核 | `CaptureAuditor(store).audit(capture_id)` | 校验固定原件摘要，重建清册和质量投影并与归档投影比较。通过返回 `True`。未知号报 `CaptureNotFound`，缺证、证据损坏及投影差异报 `AuditError`。 |
 
 `StationCatalog` 和 `ArchiveStore` 可以用 `with` 管理本地 SQLite 连接。初始化只创建缺失的表和约束，重开或重复初始化保留已有配置与历史。归档使用单次事务写投影和证据，重复成果号报 `CaptureAlreadyExists`，写入或提交失败报 `ArchiveCommitError` 并回滚本批。已发布成果的证据可通过 `archive.codec.decode_evidence(store.read_capture(capture_id).evidence)` 恢复原页和换算版本，按规范行的原件定位回查。
+
+## 单站交班
+
+日班用 `Collector(catalog, Publisher(store)).capture_frozen_with_receipts(...)` 采集时，参数与 `capture_frozen` 相同，整单原件、整单投影和每个绑定站点（含两栏均空的站点）的回执在同一事务生效；采集、写入或提交失败时新成果与新回执均不可领取，旧成果不受影响。新入口与原入口共用成果号空间，原 `capture_frozen` 继续发布没有回执的成果。
+
+| 操作 | 公开入口 | 输入与业务结果 |
+| --- | --- | --- |
+| 另存回执 | `CaptureReader(store).get_site_receipt(capture_id, station_id)` | 返回发布时固定的回执 `bytes`，重开取回同一字节。回执只含身份、本站固定口径及对本站两栏原件页行和原值的摘要承诺，不含其他站原件或读数。 |
+| 领取单站包 | `CaptureReader(store).get_site_package(capture_id, station_id)` | 返回字典：`capture_id`、`export_id`、`station_id`、`calibration`（`version`、`coefficient`、`offset`、`lower`、`upper`）、恰含 `pending`/`reviewed` 两键的 `columns`（每条原件含 `observation_id`、`raw_value`、`page_number`、`row_number`，页行从 1 开始并保留混站原页绝对位置，空栏为空列表）及实现定义的 `proof`。 |
+| 离线核验 | `archive.site.verify_site(receipt, capture_id, station_id, package)` | 只凭另存回执和预期的成果号、站点号核验，成功返回含本站规范行和本站两栏账的 `CaptureProjection`；漏行、漏栏、错址、串站、串成果、换口径或同规范值的原值改动一律抛 `AuditError`，无部分结果。 |
+| 整档复核 | `CaptureAuditor(store).audit(capture_id)` | 已签成果从固定原页和口径重建并逐站核对全部回执；回执丢失（含整组丢失）或损坏抛 `AuditError`。旧成果保持原复核行为。 |
+
+两种领取入口对未知成果抛 `CaptureNotFound`，对经原入口发布的成果抛 `archive.site.SiteReceiptUnavailable`，对已签成果中未绑定的站点抛 `collector.bindings.UnboundStation`，证据或回执缺失损坏抛 `AuditError`。
 
 ## 核账口径
 

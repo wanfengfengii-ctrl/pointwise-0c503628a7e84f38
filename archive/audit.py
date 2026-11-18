@@ -5,12 +5,10 @@ from portal.errors import InvalidRecord
 from quality.report import build_quality_result
 
 from .codec import ArchiveEncodingError, CaptureProjection, decode_evidence, decode_projection, evidence_digest
+from .errors import AuditError
 from .evidence import rebuild_manifest
+from .site import audit_site_receipts
 from .store import ArchiveStore
-
-
-class AuditError(ValueError):
-    """The frozen capture could not be reconciled with its fixed evidence."""
 
 
 class CaptureAuditor:
@@ -34,4 +32,5 @@ class CaptureAuditor:
             raise AuditError(f"invalid audit material for {capture_id!r}: {exc}") from exc
         if recomputed != published:
             raise AuditError(f"recomputed result differs from the published projection for {capture_id!r}")
+        audit_site_receipts(self._store, evidence, capture_id)
         return True
